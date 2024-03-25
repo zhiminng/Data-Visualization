@@ -1,0 +1,296 @@
+---
+title: "DSA GROUP PROJECT"
+author: "FIFA WORLD CUP 72759 "
+date: "`16-11-2023`"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+## Introduction
+
+The FIFA World Cup, being one of the most anticipated global competitions, has been held every four years since 1930. Hence, our team is interested in investigating the countries who have a relatively higher participation rate that have shown the most improvement in the World Cup based on three aspects: the **number of effective goals** (goals scored minus goals conceded), **win rate** and **Elo rating**. 
+
+We first obtained the ‘wcmatches’ dataset from TidyTuesday, which comprises every match played in FIFA World Cup history from 1930 to 2018. The dataset consists of 15 variables; however,  for simplicity, we omitted certain variables such as `city`, `stage`, `win_conditions`, `date`, `month` and `dayofweek` during our data cleaning process. Furthermore, we found out that Germany was divided into West and East Germany from 1954 to 1978. To maintain consistency in our findings, we renamed West Germany as Germany and removed East Germany from the dataset as it was only involved in the World Cup once. Every country in each plot is plotted in descending order of the improvement in each aspect.
+
+## Data Cleaning
+
+First, we identified the **top 8** countries with the highest participation number. These countries consist of **Brazil, Germany, Italy, Argentina, Mexico, England, France and Spain**. We have represented this information in a bar chart, organized in ascending order to illustrate the frequency of their participation.
+
+Excluding countries with low participation rates ensures a more reliable analysis by focusing on countries with a consistent showup in the FIFA World Cup. This methodology strengthens the validity and generalizability of the findings, providing a more accurate assessment of goal-scoring trends.
+
+```{r}
+#Load library
+library(stringr)
+library(readr)
+library(tidyverse)
+
+#Read data
+wcmatches <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-11-29/wcmatches.csv')
+worldcups <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-11-29/worldcups.csv')
+
+#combine West Germany into Germany
+wcmatches = wcmatches%>%
+  mutate(home_team = ifelse(home_team == "West Germany", "Germany", home_team),
+         away_team = ifelse(away_team == "West Germany", "Germany", away_team)) %>%
+  select(-(city:stage), -win_conditions, -(date:dayofweek))
+
+participants <- wcmatches %>%
+  select(year, home_team, away_team) %>%
+  pivot_longer(cols = home_team:away_team, names_to = "team", values_to = "country") %>%
+  select(-team) %>%
+  distinct(year, country) %>%
+  count(country) %>%
+  arrange(desc(n))
+
+top_8_participants <- participants %>%
+  pull(country)
+
+top_8_participants = top_8_participants[1:8]
+```
+
+```{r}
+top_12_participants <- participants %>%
+  top_n(12) %>%
+  mutate(country = factor(country, levels = participants$country))%>%
+  mutate(selected = ifelse(country %in% top_8_participants, "Selected","Not selected"))
+
+participants_plot <- ggplot(top_12_participants, aes(x = country, y = n)) + 
+  geom_col(aes(fill = selected)) +
+  coord_flip() + 
+  geom_text(aes(y = n + 0.5, label = n)) + 
+  labs(x = "Country", y = "Number of World Cups Participated",
+       title = "Top 12 Participation Rate Countries from 1930 to 2018", fill = "Countries") + 
+  theme_minimal() + 
+  theme(plot.title = element_text(face = 2, size = 15))
+  
+participants_plot
+```
+
+## Data Visualization
+
+### Effective Goals
+
+We calculated the number of effective goals, referred to as the `gap`, for each country by subtracting the goals scored (`score`) with the goals conceded (`opp_score`). We computed the annual average gap (`avg_gap`) for each country and calculated the slope of the linear regression line to analyze the trend of each country’s goal difference over the years. Steeper positive slopes indicate a more significant positive trend in goal-scoring performance.
+
+```{r}
+home_goals = wcmatches %>%
+  select(year, home_team, home_score) %>%
+  rename(team = home_team,
+         score = home_score) 
+
+away_goals = wcmatches %>%
+  select(year, away_team, away_score) %>%
+  rename(team = away_team,
+         score = away_score)
+
+home_opp_goals = wcmatches %>%
+  select(year, home_team, away_score) %>%
+  rename(team_a = home_team,
+         opp_score = away_score,
+         year_a = year) 
+
+away_opp_goals = wcmatches %>%
+  select(year, away_team, home_score) %>%
+  rename(team_a = away_team,
+         opp_score = home_score,
+         year_a = year)
+
+goals = rbind(home_goals,away_goals)
+opp_goals = rbind(home_opp_goals,away_opp_goals)
+
+
+goal <- cbind(goals, opp_goals) %>%
+  select(year, team, score, opp_score) %>%
+  mutate(gap = score - opp_score) %>%
+  group_by(year, team) %>%
+  summarize(avg_gap = mean(gap), .groups = "drop") %>%
+  filter(team %in% top_8_participants)
+
+avg_gap_slope <- goal %>%
+  group_by(team) %>%
+  summarize(slope = summary(lm(avg_gap ~ year))$coefficients[2], .groups = "drop") %>%
+  arrange(desc(slope)) %>%
+  pull(team)
+
+goal <- goal %>%
+  mutate(team = factor(team, levels = avg_gap_slope))
+
+goal_plot <- ggplot(goal, aes(x = year, y = avg_gap)) +
+  geom_line(aes(color = team)) +
+  geom_point(aes(color = team)) +
+  geom_smooth(method = "lm", color = "black", formula = y ~ poly(x, 1), linewidth = 0.5) +
+  facet_wrap(~ team, nrow = 2, ncol = 4) +
+  labs(title = "Improvement of Each Countries in Effective Goals",
+       subtitle = "Within Top 8 Participation Rate Countries",
+       x = "Year", y = "Scoring") + 
+  theme_minimal() + 
+  theme(legend.position = "none", plot.title = element_text(face = 2, size = 15), plot.subtitle = element_text(face = 2, size = 10))
+
+goal_plot
+```
+
+The resulting plot, goal_plot, shows the trend in the average goal difference over the years for the top 8 countries with the highest number of World Cup participation. From the plot, we can see that Mexico has the steepest slope, which means that Mexico improved the most based on its past performance on goals scored and goals conceded. This means that they've been improving a lot in scoring goals compared to their opponents over the years. This suggests that Mexico has shown consistent progress in their goal-scoring performance, making them a standout team among the top 8 countries.
+
+
+
+### Win Rate
+
+Our next analysis focused on the performance improvement of the top 8 participating countries in the FIFA World Cup from 1930 to 2018. Win rate serves as a key indicator as it reflects the team’s capability in winning matches relative to its overall participation. We sum up all the matches won and lost for each country in each year, which are denoted by the data `win` and `lose` respectively. Win rates were computed for each team by dividing the number of matches won in a given year by their total participation in that specific year. A linear regression line graph was then generated according to the win rate of the top 8 countries.
+
+```{r}
+win <- wcmatches %>%
+  select(year, winning_team) %>%
+  na.omit() %>%
+  group_by(year) %>%
+  count(winning_team) %>%
+  rename(team = winning_team, win_match = n)
+
+lose <- wcmatches %>%
+  select(year, losing_team) %>%
+  na.omit() %>%
+  group_by(year) %>%
+  count(losing_team) %>%
+  rename(team = losing_team, lose_match = n)
+
+win_rate <- win %>%
+  full_join(lose, by = c("year", "team")) %>%
+  mutate_all(replace_na, 0) %>%
+  group_by(year, team) %>%
+  summarize(rate = win_match / (win_match + lose_match)) %>%
+  ungroup() %>%
+  filter(team %in% top_8_participants)
+
+win_slope <- win_rate %>%
+  group_by(team) %>%
+  summarize(slope = summary(lm(rate ~ year))$coefficients[2], .groups = "drop") %>%
+  arrange(desc(slope)) %>%
+  pull(team)
+
+win_rate <- win_rate %>%
+  mutate(team = factor(team, levels = win_slope))
+
+matches_win_plot <- ggplot(win_rate, aes(x = year, y = rate)) + 
+  geom_line(aes(color = team)) +
+  geom_point(aes(color = team)) +
+  facet_wrap(~ team, nrow = 2, ncol = 4) + 
+  geom_smooth(method = "lm", color = "black", formula = y ~ poly(x, 1), linewidth = 0.5) +
+  labs(title = "Improvement of Each Countries in Win Rate",
+       subtitle = "Within Top 8 Participation Rate Countries",
+       x = "Year", y = "Winning Rate") + 
+  theme_minimal() + 
+  theme(legend.position = "none", plot.title = element_text(face = 2, size = 15), plot.subtitle = element_text(face = 2, size = 10))
+
+matches_win_plot
+```
+
+Based on the plot, there are noticeable fluctuations in win rates for each country. However, a positive trend unfolds from 1930 to 2018, revealing an upward trend of the linear regression line. Mexico shows the highest improvement in win rate over the period characterized by the steepest incline in the plotted graph. Following Mexico, Germany and France also showcased notable improvements in the win rate. In contrast, Italy’s performance is characterized by a negative trend, indicating a decline in effectiveness in winning games in the FIFA World Cup over the analyzed period. 
+
+
+
+### Elo Rating
+
+Last but not least, we considered the Elo rating system as a key indicator of measurement. This system is a well-designed statistical method to quantify the relative skill levels of the teams. The Elo rating system’s primary strength lies in its consideration of opponent strength, providing a nuanced evaluation of performance. This distinctive feature is especially advantageous when teams encounter highly challenging opponents, preventing significant decline for teams that face stronger rivals. 
+
+First, we prepared a list of distinct countries involved in world cup matches. Next, we converted the `outcome` of the matches to numerical values (1 denoting win, 0.5 for a draw, 0 signifying loss). A structured data frame was then established to archive Elo ratings corresponding to each team across successive years. Notably, an initial rating of 1500 was assigned to each country making its first appearance in the competition, establishing a baseline for subsequent assessments.
+
+In the computation of Elo ratings (Elo, 1978; Hvattum & Arntzen, 2010; Wolf et al., 2021), we performed a double for loop, with the outer loop iterating over each unique year in the dataset while the inner loop processed each match occurring in the corresponding year subset. For each match, it extracts information and retrieves the current Elo ratings of the home and away team. Notably, there is an adjustment of 100 in the Elo expected score calculation, recognized as the “home-field advantage adjustment”. This adjustment reflects the general belief that being the home team contributes to a higher expected performance level (Hvattum & Arntzen, 2010; Wolf et al., 2021). 
+
+```{r}
+# Create a list for all distinct countries
+countries <- union(wcmatches$home_team, wcmatches$away_team)
+
+# Change outcome to 1 for win, 0.5 for draw, 0 for lose
+matches_result = wcmatches %>%
+  mutate(outcome = ifelse(outcome == "H", 1, ifelse(outcome == "A", 0, 0.5)))
+
+# Initialize ratings for each player
+elo_ratings = data.frame(team = NA, year = NA, rating = NA)
+
+# Initialize rating = 1500 for every country
+current_elo_rating = data.frame(team = countries,
+                               rating = 1500)
+
+# Calculate Elo Rating change
+calculate_elo_change = function(score, expected, k = 32) { # score = 1 for win, , 0 for lose, expected = probability to win
+  round(k * (score - expected)) # k is the maximum possible adjustment per game
+}
+
+for (yr in unique(worldcups$year)) { # process year by year
+  yearly_data = subset(matches_result, year == yr) # select result for that year
+  
+  for (i in 1:nrow(yearly_data)) { # for every match in that year
+    home_team = yearly_data$home_team[i] 
+    away_team = yearly_data$away_team[i]
+    
+    home_rating = current_elo_rating[current_elo_rating$team == home_team, "rating"]  
+    away_rating = current_elo_rating[current_elo_rating$team == away_team, "rating"]
+    
+    home_expected_score = 1 / (1 + 10^((away_rating - home_rating + 100) / 400))
+    away_expected_score = 1 / (1 + 10^((home_rating - away_rating) / 400))
+    
+    home_change = calculate_elo_change(yearly_data$outcome[i], home_expected_score)
+    away_change = calculate_elo_change(1 - yearly_data$outcome[i], away_expected_score)
+    
+    current_elo_rating[current_elo_rating$team == home_team, "rating"] = home_rating + home_change
+    current_elo_rating[current_elo_rating$team == away_team, "rating"] = away_rating + away_change
+  }
+  
+  current_elo_rating$year = yr
+  elo_ratings = rbind(elo_ratings, current_elo_rating)
+}
+
+elo_rating = elo_ratings %>%
+  filter(team %in% top_8_participants)
+
+elo_rating_slope = elo_rating %>%
+  group_by(team) %>%
+  summarize(slope = summary(lm(rating ~ year))$coefficients[2], .groups = "drop") %>%
+  arrange(desc(slope)) %>%
+  pull(team)
+
+elo_rating <- elo_rating %>%
+  mutate(team = factor(team, levels = elo_rating_slope))
+
+elo_rating_plot <- ggplot(elo_rating, aes(x = year, y = rating, color = team)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ team, nrow = 2, ncol = 4) + 
+    labs(title = "Improvement of Each Countries in Elo Rating",
+         subtitle = "Within Top 8 Participation Rate Countries",
+         x = "Year", y = "Elo Rating") + 
+  theme_minimal() + 
+  theme(legend.position = "none", plot.title = element_text(face = 2, size = 15), plot.subtitle = element_text(face = 2, size = 10))
+
+elo_rating_plot
+```
+
+Following the computation of Elo ratings for the teams, linear regression models were applied to calculate the slope of Elo ratings over time. The visual representation reveals Brazil’s notable distinction with the steepest slope, indicative of its consistently superior Elo rating across the years. Taking Italy as an illustrative case, its Elo rating exhibited a rapid increase before 1950, owing to an impressive win rate. However, after 1950, the Elo rating experienced a slight decline or remained static, indicating a regression in Italy’s performance. This emphasizes the importance of the Elo rating system. A team experiences a boost in its rating when it defeats a weaker opponent. However, as the team’s rating ascends, the team must consistently conquer stronger opponents to maintain or to increase its rating even more. 
+
+
+
+## Discussion
+
+Analyzing the three graphs, it becomes evident that Mexico stands out in higher goal-scoring and win rate, yet it ranks last in Elo ratings. One potential reason lies in Mexico’s inconsistent performance. The Elo system may not adequately adjust the team’s rating if the team’s performance lacks consistency. Furthermore, another contributing factor is that Mexico tends to win consistently against opponents with lower Elo ratings, which does not result in substantial Elo gains. Next, we noticed that Germany and France happen to be included in the top 4 of each plot (ranks of Germany are 4th, 2nd, 2nd, and ranks of France are 2nd, 3rd, 3rd, respectively). Although Germany ranks behind France in effective goals,  it has a greater improvement in other sections. Hence, we conclude that **Germany is the most improved country** among these 8 selected countries. 
+
+It is important to acknowledge the limitation of having a small sample size in our project. Our question mainly focuses on the top 8 countries in participant rate. However, leading in participant rate does not necessarily correlate with a significant improvement rate. Besides, we combined the data of West Germany and Germany while excluding the presence of East Germany, further constraining our sample size. Hence, our plots could only represent and compare improvements among these 8 countries, resulting in a potential bias limiting the generalizability of findings in determining the most improved country among all FIFA World Cup participants. These limitations are noteworthy as we acknowledge significant differences in the number of World Cup participants for each country. Discussing improvement for countries with low participation rates may lack meaningful significance. Moreover, the considerable variances in top performers for each aspect (win rate, goal-scoring, and Elo rating) makes the comparisons more challenging. As a result our project focuses on the selected 8 countries in various aspects, acknowledging the difficulty in drawing broader conclusions due to these limitations.
+
+
+
+## References
+
+### Data Source:
+<https://github.com/rfordatascience/tidytuesday/tree/master/data/2022/2022-11-29>
+
+### Other Resources:
+Elo, A. E. (1978). The rating of chessplayers, past and present. Arco Pub.
+
+Hvattum, L. M., and Arntzen, H. (2010). Using ELO ratings for match result prediction in association football. International Journal of Forecasting, 26(3), 460–470. <https://doi.org/10.1016/j.ijforecast.2009.10.002>
+
+Wolf, S., Schmitt, M., and Schuller, B. (2021). A football player rating system. Journal of Sports Analytics, 6(4), 243–257.     <https://doi.org/10.3233/JSA-200411>
